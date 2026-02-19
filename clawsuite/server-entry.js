@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { join, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { WebSocketServer, default as WebSocket } from 'ws'
 import server from './dist/server/server.js'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
@@ -136,6 +137,65 @@ const httpServer = createServer(async (req, res) => {
     res.writeHead(500)
     res.end('Internal Server Error')
   }
+})
+
+// WebSocket proxy for /ws-gateway
+const wsGatewayServer = new WebSocketServer({ noServer: true })
+
+httpServer.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+  if (url.pathname !== '/ws-gateway') {
+    return
+  }
+
+  wsGatewayServer.handleUpgrade(req, socket, head, (clientWs) => {
+    const upstreamUrl = (process.env.CLAWDBOT_GATEWAY_URL || 'ws://127.0.0.1:18789').trim()
+    const token = (process.env.CLAWDBOT_GATEWAY_TOKEN || '').trim()
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined
+
+    console.log(`[ws-gateway] proxying to ${upstreamUrl}`)
+
+    const upstreamWs = new WebSocket(upstreamUrl, headers ? { headers } : undefined)
+
+    const closeBoth = () => {
+      if (clientWs.readyState !== WebSocket.CLOSED && clientWs.readyState !== WebSocket.CLOSING) {
+        if (typeof clientWs.terminate === 'function') clientWs.terminate()
+        else clientWs.close()
+      }
+      if (upstreamWs.readyState !== WebSocket.CLOSED && upstreamWs.readyState !== WebSocket.CLOSING) {
+        if (typeof upstreamWs.terminate === 'function') upstreamWs.terminate()
+        else upstreamWs.close()
+      }
+    }
+
+    // Forward messages from client to upstream
+    clientWs.on('message', (data, isBinary) => {
+      if (upstreamWs.readyState === WebSocket.OPEN) {
+        upstreamWs.send(data, { binary: isBinary })
+      }
+    })
+
+    // Forward messages from upstream to client
+    upstreamWs.on('message', (data, isBinary) => {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(data, { binary: isBinary })
+      }
+    })
+
+    // Close both sockets when either side closes
+    clientWs.on('close', closeBoth)
+    upstreamWs.on('close', closeBoth)
+
+    // Handle errors
+    clientWs.on('error', (err) => {
+      console.error('[ws-gateway] client error:', err.message)
+      closeBoth()
+    })
+    upstreamWs.on('error', (err) => {
+      console.error('[ws-gateway] upstream error:', err.message)
+      closeBoth()
+    })
+  })
 })
 
 httpServer.listen(port, host, () => {
