@@ -172,10 +172,30 @@ func handleRPC(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
 }
 
 func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
+    // Only support chat methods that map to ZeroClaw /webhook
+    if f.Method != "sessions.send" && f.Method != "chat.send" {
+        sendError(ws, writeMu, f.ID, "unsupported method: "+f.Method)
+        return
+    }
 
+    // Parse params to extract message field
+    var params struct {
+        Message string `json:"message"`
+    }
+    if len(f.Params) > 0 {
+        if err := json.Unmarshal(f.Params, &params); err != nil {
+            sendError(ws, writeMu, f.ID, "invalid params: "+err.Error())
+            return
+        }
+    }
+    if params.Message == "" {
+        sendError(ws, writeMu, f.ID, "missing params.message")
+        return
+    }
+
+    // Build ZeroClaw webhook payload
     body := map[string]any{
-        "method": f.Method,
-        "params": json.RawMessage(f.Params),
+        "message": params.Message,
     }
 
     j, _ := json.Marshal(body)
@@ -199,21 +219,28 @@ func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
     }
     defer resp.Body.Close()
 
-    var payload any
-    json.NewDecoder(resp.Body).Decode(&payload)
+    // Decode ZeroClaw response but don't forward it directly
+    var zeroclawResp struct {
+        Response string `json:"response"`
+        Model    string `json:"model"`
+        Error    string `json:"error"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&zeroclawResp); err != nil {
+        sendError(ws, writeMu, f.ID, "failed to decode zeroclaw response: "+err.Error())
+        return
+    }
 
+    if zeroclawResp.Error != "" {
+        sendError(ws, writeMu, f.ID, zeroclawResp.Error)
+        return
+    }
+
+    // Respond to ClawSuite with minimal payload
     safeWriteJSON(ws, writeMu, Frame{
         Type:    "res",
         ID:      f.ID,
         Ok:      true,
-        Payload: mustJSON(payload),
-    })
-
-    safeWriteJSON(ws, writeMu, Frame{
-        Type:    "event",
-        Event:   "session.updated",
-        Seq:     nextSeq(),
-        Payload: mustJSON(payload),
+        Payload: mustJSON(map[string]any{}),
     })
 }
 
