@@ -140,6 +140,9 @@ func heartbeat(ws *websocket.Conn, writeMu *sync.Mutex) {
 }
 
 func handleRPC(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
+    if os.Getenv("ZC_BRIDGE_DEBUG") == "1" {
+        log.Printf("[rpc] method=%s id=%s paramsLen=%d", f.Method, f.ID, len(f.Params))
+    }
     switch f.Method {
 
     case "sessions.list":
@@ -181,6 +184,9 @@ func handleRPC(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
 }
 
 func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
+    if os.Getenv("ZC_BRIDGE_DEBUG") == "1" {
+        log.Printf("[forward] method=%s id=%s", f.Method, f.ID)
+    }
     // Only support chat methods that map to ZeroClaw /webhook
     if f.Method != "sessions.send" && f.Method != "chat.send" {
         sendError(ws, writeMu, f.ID, "unsupported method: "+f.Method)
@@ -225,6 +231,7 @@ func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
 
     req, err := http.NewRequest("POST", zeroclawURL, bytes.NewReader(j))
     if err != nil {
+        log.Printf("[forward] error: %s", err)
         sendError(ws, writeMu, f.ID, err.Error())
         return
     }
@@ -237,10 +244,15 @@ func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
 
     resp, err := http.DefaultClient.Do(req)
     if err != nil {
+        log.Printf("[forward] error: %s", err)
         sendError(ws, writeMu, f.ID, err.Error())
         return
     }
     defer resp.Body.Close()
+
+    if os.Getenv("ZC_BRIDGE_DEBUG") == "1" {
+        log.Printf("[forward] zeroclaw status=%d", resp.StatusCode)
+    }
 
     // Read full response body
     b := make([]byte, 0)
