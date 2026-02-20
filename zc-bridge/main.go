@@ -66,6 +66,18 @@ func nextSeq() int64 {
     return seq
 }
 
+func safeWriteJSON(ws *websocket.Conn, mu *sync.Mutex, v any) error {
+    mu.Lock()
+    defer mu.Unlock()
+    return ws.WriteJSON(v)
+}
+
+func safeWriteControl(ws *websocket.Conn, mu *sync.Mutex, messageType int, data []byte, deadline time.Time) error {
+    mu.Lock()
+    defer mu.Unlock()
+    return ws.WriteControl(messageType, data, deadline)
+}
+
 func main() {
     http.HandleFunc("/", handleWS)
     log.Println("zc-bridge listening on", addr)
@@ -80,9 +92,11 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
     }
     defer ws.Close()
 
+    writeMu := &sync.Mutex{}
+
     log.Println("client connected")
 
-    ws.WriteJSON(Frame{
+    safeWriteJSON(ws, writeMu, Frame{
         Type:  "event",
         Event: "connect.challenge",
         Payload: mustJSON(map[string]any{
@@ -96,14 +110,14 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
             return
         }
         if f.Type == "req" && f.Method == "connect" {
-            ws.WriteJSON(Frame{Type: "res", ID: f.ID, Ok: true})
+            safeWriteJSON(ws, writeMu, Frame{Type: "res", ID: f.ID, Ok: true})
             break
         }
     }
 
     log.Println("gateway authenticated")
 
-    go heartbeat(ws)
+    go heartbeat(ws, writeMu)
 
     for {
         var f Frame
@@ -113,18 +127,18 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
         if f.Type != "req" {
             continue
         }
-        go handleRPC(ws, f)
+        go handleRPC(ws, writeMu, f)
     }
 }
 
-func heartbeat(ws *websocket.Conn) {
+func heartbeat(ws *websocket.Conn, writeMu *sync.Mutex) {
     t := time.NewTicker(30 * time.Second)
     for range t.C {
-        ws.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(2*time.Second))
+        safeWriteControl(ws, writeMu, websocket.PingMessage, []byte("ping"), time.Now().Add(2*time.Second))
     }
 }
 
-func handleRPC(ws *websocket.Conn, f Frame) {
+func handleRPC(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
     switch f.Method {
 
     case "sessions.list":
@@ -135,7 +149,7 @@ func handleRPC(ws *websocket.Conn, f Frame) {
         }
         sessionsMu.Unlock()
 
-        ws.WriteJSON(Frame{
+        safeWriteJSON(ws, writeMu, Frame{
             Type:    "res",
             ID:      f.ID,
             Ok:      true,
@@ -143,7 +157,7 @@ func handleRPC(ws *websocket.Conn, f Frame) {
         })
 
     case "models.list":
-        ws.WriteJSON(Frame{
+        safeWriteJSON(ws, writeMu, Frame{
             Type:    "res",
             ID:      f.ID,
             Ok:      true,
@@ -153,11 +167,11 @@ func handleRPC(ws *websocket.Conn, f Frame) {
         })
 
     default:
-        handleZeroClawForward(ws, f)
+        handleZeroClawForward(ws, writeMu, f)
     }
 }
 
-func handleZeroClawForward(ws *websocket.Conn, f Frame) {
+func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
 
     body := map[string]any{
         "method": f.Method,
@@ -168,7 +182,7 @@ func handleZeroClawForward(ws *websocket.Conn, f Frame) {
 
     req, err := http.NewRequest("POST", zeroclawURL, bytes.NewReader(j))
     if err != nil {
-        sendError(ws, f.ID, err.Error())
+        sendError(ws, writeMu, f.ID, err.Error())
         return
     }
     req.Header.Set("Content-Type", "application/json")
@@ -180,7 +194,7 @@ func handleZeroClawForward(ws *websocket.Conn, f Frame) {
 
     resp, err := http.DefaultClient.Do(req)
     if err != nil {
-        sendError(ws, f.ID, err.Error())
+        sendError(ws, writeMu, f.ID, err.Error())
         return
     }
     defer resp.Body.Close()
@@ -188,14 +202,14 @@ func handleZeroClawForward(ws *websocket.Conn, f Frame) {
     var payload any
     json.NewDecoder(resp.Body).Decode(&payload)
 
-    ws.WriteJSON(Frame{
+    safeWriteJSON(ws, writeMu, Frame{
         Type:    "res",
         ID:      f.ID,
         Ok:      true,
         Payload: mustJSON(payload),
     })
 
-    ws.WriteJSON(Frame{
+    safeWriteJSON(ws, writeMu, Frame{
         Type:    "event",
         Event:   "session.updated",
         Seq:     nextSeq(),
@@ -203,8 +217,8 @@ func handleZeroClawForward(ws *websocket.Conn, f Frame) {
     })
 }
 
-func sendError(ws *websocket.Conn, id, msg string) {
-    ws.WriteJSON(Frame{
+func sendError(ws *websocket.Conn, writeMu *sync.Mutex, id, msg string) {
+    safeWriteJSON(ws, writeMu, Frame{
         Type: "res",
         ID:   id,
         Ok:   false,
