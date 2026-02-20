@@ -3,7 +3,7 @@ package main
 import (
     "bytes"
     "encoding/json"
-    "io"
+    "fmt"
     "log"
     "net/http"
     "os"
@@ -179,9 +179,11 @@ func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
         return
     }
 
-    // Parse params to extract message field
+    // Parse params
     var params struct {
-        Message string `json:"message"`
+        SessionKey    string `json:"sessionKey"`
+        Message       string `json:"message"`
+        IdempotencyKey string `json:"idempotencyKey"`
     }
     if len(f.Params) > 0 {
         if err := json.Unmarshal(f.Params, &params); err != nil {
@@ -192,6 +194,18 @@ func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
     if params.Message == "" {
         sendError(ws, writeMu, f.ID, "missing params.message")
         return
+    }
+
+    // Determine sessionKey (fallback to "main")
+    sessionKey := params.SessionKey
+    if sessionKey == "" {
+        sessionKey = "main"
+    }
+
+    // Determine runId
+    runId := params.IdempotencyKey
+    if runId == "" {
+        runId = fmt.Sprintf("run_%d", time.Now().UnixNano())
     }
 
     // Build ZeroClaw webhook payload
@@ -220,32 +234,96 @@ func handleZeroClawForward(ws *websocket.Conn, writeMu *sync.Mutex, f Frame) {
     }
     defer resp.Body.Close()
 
-    // Log raw response for diagnosis
-    b, _ := io.ReadAll(resp.Body)
-    log.Printf("[zeroclaw] status=%d body=%s", resp.StatusCode, string(b))
-
-    // Decode ZeroClaw response but don't forward it directly
-    var zeroclawResp struct {
-        Response string `json:"response"`
-        Model    string `json:"model"`
-        Error    string `json:"error"`
+    // Read full response body
+    b := make([]byte, 0)
+    if resp.Body != nil {
+        buf := make([]byte, 4096)
+        for {
+            n, readErr := resp.Body.Read(buf)
+            if n > 0 {
+                b = append(b, buf[:n]...)
+            }
+            if readErr != nil {
+                break
+            }
+        }
     }
-    if err := json.Unmarshal(b, &zeroclawResp); err != nil {
-        sendError(ws, writeMu, f.ID, "failed to decode zeroclaw response: "+err.Error())
+
+    // Check for error status
+    if resp.StatusCode >= 400 {
+        sendError(ws, writeMu, f.ID, fmt.Sprintf("zeroclaw %d: %s", resp.StatusCode, string(b)))
         return
     }
 
-    if zeroclawResp.Error != "" {
-        sendError(ws, writeMu, f.ID, zeroclawResp.Error)
-        return
+    // Extract assistant text from response
+    assistantText := ""
+    var m map[string]any
+    if json.Unmarshal(b, &m) == nil {
+        // Try common keys
+        for _, key := range []string{"response", "message", "text", "output"} {
+            if v, ok := m[key]; ok {
+                if s, ok := v.(string); ok && s != "" {
+                    assistantText = s
+                    break
+                }
+            }
+        }
+        // Try nested data.text
+        if assistantText == "" {
+            if data, ok := m["data"].(map[string]any); ok {
+                if v, ok := data["text"]; ok {
+                    if s, ok := v.(string); ok && s != "" {
+                        assistantText = s
+                    }
+                }
+            }
+        }
+    }
+    // Fallback to raw string if not found
+    if assistantText == "" {
+        assistantText = string(b)
+    }
+    if assistantText == "" {
+        assistantText = "(empty response)"
     }
 
-    // Respond to ClawSuite with minimal payload
+    // Send RPC response frame first
     safeWriteJSON(ws, writeMu, Frame{
         Type:    "res",
         ID:      f.ID,
         Ok:      true,
-        Payload: mustJSON(map[string]any{}),
+        Payload: mustJSON(map[string]any{"runId": runId}),
+    })
+
+    // Emit agent event
+    safeWriteJSON(ws, writeMu, Frame{
+        Type:  "event",
+        Event: "agent",
+        Seq:   nextSeq(),
+        Payload: mustJSON(map[string]any{
+            "runId":      runId,
+            "sessionKey": sessionKey,
+            "stream":     "assistant",
+            "data": map[string]any{
+                "text": assistantText,
+            },
+        }),
+    })
+
+    // Emit chat final event
+    safeWriteJSON(ws, writeMu, Frame{
+        Type:  "event",
+        Event: "chat",
+        Seq:   nextSeq(),
+        Payload: mustJSON(map[string]any{
+            "runId":      runId,
+            "sessionKey": sessionKey,
+            "state":      "final",
+            "message": map[string]any{
+                "role":    "assistant",
+                "content": assistantText,
+            },
+        }),
     })
 }
 
