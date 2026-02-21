@@ -57,8 +57,7 @@ impl Provider for MockProvider {
     ) -> Result<ChatResponse> {
         let mut guard = self.responses.lock().unwrap();
         if guard.is_empty() {
-            return Ok(ChatResponse {
-                text: Some("done".into()),
+            return Ok(ChatResponse { usage: None, text: Some("done".into()),
                 tool_calls: vec![],
             });
         }
@@ -155,15 +154,13 @@ fn make_observer() -> Arc<dyn Observer> {
 }
 
 fn text_response(text: &str) -> ChatResponse {
-    ChatResponse {
-        text: Some(text.into()),
+    ChatResponse { usage: None, text: Some(text.into()),
         tool_calls: vec![],
     }
 }
 
 fn tool_response(calls: Vec<ToolCall>) -> ChatResponse {
-    ChatResponse {
-        text: Some(String::new()),
+    ChatResponse { usage: None, text: Some(String::new()),
         tool_calls: calls,
     }
 }
@@ -260,8 +257,7 @@ async fn e2e_multi_step_tool_chain() {
 #[tokio::test]
 async fn e2e_xml_dispatcher_tool_call() {
     let provider = Box::new(MockProvider::new(vec![
-        ChatResponse {
-            text: Some(
+        ChatResponse { usage: None, text: Some(
                 r#"<tool_call>
 {"name": "echo", "arguments": {"message": "xml dispatch"}}
 </tool_call>"#

@@ -638,8 +638,7 @@ mod tests {
         ) -> Result<crate::providers::ChatResponse> {
             let mut guard = self.responses.lock();
             if guard.is_empty() {
-                return Ok(crate::providers::ChatResponse {
-                    text: Some("done".into()),
+                return Ok(crate::providers::ChatResponse { usage: None, text: Some("done".into()),
                     tool_calls: vec![],
                 });
             }
@@ -675,8 +674,7 @@ mod tests {
     #[tokio::test]
     async fn turn_without_tools_returns_text() {
         let provider = Box::new(MockProvider {
-            responses: Mutex::new(vec![crate::providers::ChatResponse {
-                text: Some("hello".into()),
+            responses: Mutex::new(vec![crate::providers::ChatResponse { usage: None, text: Some("hello".into()),
                 tool_calls: vec![],
             }]),
         });
@@ -708,16 +706,14 @@ mod tests {
     async fn turn_with_native_dispatcher_handles_tool_results_variant() {
         let provider = Box::new(MockProvider {
             responses: Mutex::new(vec![
-                crate::providers::ChatResponse {
-                    text: Some(String::new()),
+                crate::providers::ChatResponse { usage: None, text: Some(String::new()),
                     tool_calls: vec![crate::providers::ToolCall {
                         id: "tc1".into(),
                         name: "echo".into(),
                         arguments: "{}".into(),
                     }],
                 },
-                crate::providers::ChatResponse {
-                    text: Some("done".into()),
+                crate::providers::ChatResponse { usage: None, text: Some("done".into()),
                     tool_calls: vec![],
                 },
             ]),
