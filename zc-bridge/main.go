@@ -58,12 +58,18 @@ func initOTel() (func(), error) {
 		return nil, fmt.Errorf("failed to create trace exporter: %w", err)
 	}
 
+	// Use SimpleSpanProcessor for instant delivery during testing/dev
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+
+	// Log internal OTel errors to container logs
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		log.Printf("[otel-internal] error: %v", err)
+	}))
 
 	return func() {
 		_ = tp.Shutdown(ctx)
@@ -270,6 +276,11 @@ func main() {
 
 	http.HandleFunc("/", handleWS)
 	log.Println("zc-bridge listening on", addr)
+
+	// Startup span to verify connectivity
+	_, startSpan := tracer.Start(context.Background(), "bridge.startup")
+	startSpan.End()
+
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
