@@ -19,6 +19,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 var (
@@ -28,14 +30,26 @@ var (
 	tracer      = otel.Tracer("zc-bridge")
 )
 
-// initOTel initializes the OpenTelemetry pipeline.
+// initOTel initializes the OpenTelemetry pipeline with robust connection handling.
 func initOTel() (func(), error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	endpoint := getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
-	// Strip http:// prefix if present, as otlptracegrpc expects host:port
+	endpoint := getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector-ek4ck8gkoscs4884os8cwgkc:4317")
+	// For Go gRPC, we must NOT have http:// prefix
 	if len(endpoint) > 7 && endpoint[:7] == "http://" {
 		endpoint = endpoint[7:]
+	}
+
+	log.Printf("[otel] connecting to %s...", endpoint)
+
+	// Create a persistent gRPC connection with blocking dial and retries
+	conn, err := grpc.DialContext(ctx, endpoint,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial otel collector: %w", err)
 	}
 
 	res, err := resource.Merge(
@@ -50,15 +64,12 @@ func initOTel() (func(), error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	exporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithInsecure(),
-		otlptracegrpc.WithEndpoint(endpoint),
-	)
+	exporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trace exporter: %w", err)
 	}
 
-	// Use SimpleSpanProcessor for instant delivery during testing/dev
+	// Use SimpleSpanProcessor for instant delivery
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		sdktrace.WithResource(res),
@@ -66,13 +77,13 @@ func initOTel() (func(), error) {
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
-	// Log internal OTel errors to container logs
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
 		log.Printf("[otel-internal] error: %v", err)
 	}))
 
 	return func() {
-		_ = tp.Shutdown(ctx)
+		_ = tp.Shutdown(context.Background())
+		_ = conn.Close()
 	}, nil
 }
 
