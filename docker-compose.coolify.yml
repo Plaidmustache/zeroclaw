@@ -28,6 +28,12 @@ services:
       # Allow public bind inside Docker (required for container networking)
       - ZEROCLAW_ALLOW_PUBLIC_BIND=true
 
+      # OpenTelemetry configuration
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_SERVICE_NAME=zeroclaw
+      - OTEL_RESOURCE_ATTRIBUTES=service.version=1.0,deploy.environment=coolify
+
       # Optional: Additional provider keys for model routing
       # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -70,6 +76,11 @@ services:
     environment:
       - ZEROCLAW_URL=http://zeroclaw:3000/webhook
       - ZEROCLAW_BEARER_TOKEN
+      # OpenTelemetry configuration
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_SERVICE_NAME=zc-bridge
+      - OTEL_RESOURCE_ATTRIBUTES=service.version=1.0,deploy.environment=coolify
     depends_on:
       - zeroclaw
     labels:
@@ -87,6 +98,11 @@ services:
       - CLAWDBOT_GATEWAY_TOKEN=${ZEROCLAW_BEARER_TOKEN}
       - CLAWSUITE_ALLOWED_HOSTS
       - CLAWSUITE_PASSWORD
+      # OpenTelemetry configuration
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_SERVICE_NAME=clawsuite
+      - OTEL_RESOURCE_ATTRIBUTES=service.version=1.0,deploy.environment=coolify
     depends_on:
       - zc-bridge
     labels:
