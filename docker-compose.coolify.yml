@@ -11,7 +11,7 @@
 
 services:
   zeroclaw:
-    image: ghcr.io/zeroclaw-labs/zeroclaw:latest
+    build: .
     container_name: zeroclaw
     restart: unless-stopped
 
