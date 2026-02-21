@@ -33,10 +33,10 @@ services:
       # The volume (zeroclaw-data) must have config.toml with:
       #   [observability]
       #   backend = "opentelemetry"
-      #   otel_endpoint = "http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4318"
+      #   otel_endpoint = "http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4317"
       # This was set manually on the volume on 2026-02-21.
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=zeroclaw
       - OTEL_RESOURCE_ATTRIBUTES=service.version=1.0,deploy.environment=coolify
 
@@ -83,8 +83,8 @@ services:
       - ZEROCLAW_URL=http://zeroclaw:3000/webhook
       - ZEROCLAW_BEARER_TOKEN
       # OpenTelemetry configuration
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=zc-bridge
       - OTEL_RESOURCE_ATTRIBUTES=service.version=1.0,deploy.environment=coolify
     depends_on:
@@ -105,8 +105,8 @@ services:
       - CLAWSUITE_ALLOWED_HOSTS
       - CLAWSUITE_PASSWORD
       # OpenTelemetry configuration
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-ek4ck8gkoscs4884os8cwgkc:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=clawsuite
       - OTEL_RESOURCE_ATTRIBUTES=service.version=1.0,deploy.environment=coolify
     depends_on:

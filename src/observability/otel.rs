@@ -33,19 +33,16 @@ pub struct OtelObserver {
 impl OtelObserver {
     /// Create a new OTel observer exporting to the given OTLP endpoint.
     ///
-    /// Uses HTTP/protobuf transport (port 4318 by default).
-    /// Falls back to `http://localhost:4318` if no endpoint is provided.
+    /// Uses gRPC transport (port 4317 by default).
+    /// Falls back to `http://localhost:4317` if no endpoint is provided.
     pub fn new(endpoint: Option<&str>, service_name: Option<&str>) -> Result<Self, String> {
-        let base_endpoint = endpoint.unwrap_or("http://localhost:4318").trim_end_matches('/');
+        let endpoint = endpoint.unwrap_or("http://localhost:4317");
         let service_name = service_name.unwrap_or("zeroclaw");
-
-        let trace_endpoint = format!("{}/v1/traces", base_endpoint);
-        let metric_endpoint = format!("{}/v1/metrics", base_endpoint);
 
         // ── Trace exporter ──────────────────────────────────────
         let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .with_endpoint(&trace_endpoint)
+            .with_tonic()
+            .with_endpoint(endpoint)
             .build()
             .map_err(|e| format!("Failed to create OTLP span exporter: {e}"))?;
 
@@ -64,8 +61,8 @@ impl OtelObserver {
 
         // ── Metric exporter ─────────────────────────────────────
         let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .with_endpoint(&metric_endpoint)
+            .with_tonic()
+            .with_endpoint(endpoint)
             .build()
             .map_err(|e| format!("Failed to create OTLP metric exporter: {e}"))?;
 
