@@ -1,7 +1,8 @@
 FROM golang:1.24-alpine AS build
 WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN go mod tidy
 RUN go build -o zc-bridge
 
 FROM alpine:3.19
