@@ -35,6 +35,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/server-entry.js ./
+COPY --from=builder /app/otel.js ./
 
 # Copy built-in OpenClaw skills
 COPY --from=skills /openclaw-skills ./openclaw-skills
